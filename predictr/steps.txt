@@ -1,0 +1,82 @@
+Create a folder 
+/data/239/yelp/predOut
+/data/239/yelp/yelp_dataset_challenge_academic_dataset (with yelp data in it)
+
+1. GetRestaurantIDs (/data/239/yelp/predOut/restaurantIds.txt and /data/239/yelp/predOut/business.json)
+	- Filters the restaurant data from all businesses
+2. GetRestReviewedUsers (/data/239/yelp/predOut/restRevUsers.txt)
+	- Get the users and restaurants that has > 2 reviews from the same user
+3. GetRestaurantCity (/data/239/yelp/predOut/restaurantCities.txt)
+	- Get the restaurant and city
+4. GetUserData (/data/239/yelp/predOut/users.csv)
+	- Get the user's info from json to CSV
+5. GetTrainingRestaurantIds (/data/239/yelp/predOut/trainRestaurantIds.txt)
+	- Get the training restaurant ids
+	- For each user with > 2 restaurant reviews
+		- We keep the latest restaurant as the target restaurant
+		- And previous 4 restaurant reviews as previous visited restaurants
+
+6. FeatureExtraction (/data/239/yelp/predOut/features.txt) 
+	- Extract features
+	- Set this in code to be TRAIN
+        // TODO change here
+        String option = "TRAIN";
+6.b FeatureExtractionMore (/data/239/yelp/predOut/features.txt)
+	- Extract more features
+	- Set this in code to be TRAIN
+        // TODO change here
+        String option = "TRAIN";
+
+7. Train models (change the path to your jar) (run in the folder where spark is there)
+rm -rf /tmp/t-lbfgs;./bin/spark-submit --class com.sjsu.cmpe239.yelp.spark.LRWithLBFGS --master spark://poornimas-MacBook-Pro.local:7077 ~/predictr/build/libs/predictr-1.0-SNAPSHOT.jar;cat /tmp/t-lbfgs/pr/part-0000* > lbfgs-pr;cat /tmp/t-lbfgs/roc/part-0000* > lbfgs-roc
+
+rm -rf /tmp/t-sgd;./bin/spark-submit --class com.sjsu.cmpe239.yelp.spark.LRWithSGD --master spark://poornimas-MacBook-Pro.local:7077 ~/predictr/build/libs/predictr-1.0-SNAPSHOT.jar;cat /tmp/t-sgd/pr/part-0000* > sgd-pr;cat /tmp/t-sgd/roc/part-0000* > sgd-roc
+
+rm -rf /tmp/t-dec;./bin/spark-submit --class com.sjsu.cmpe239.yelp.spark.LRDecisionTree --master spark://poornimas-MacBook-Pro.local:7077 ~/predictr/build/libs/predictr-1.0-SNAPSHOT.jar;cat /tmp/t-dec/pr/part-0000* > dec-pr;cat /tmp/t-dec/roc/part-0000* > dec-roc
+
+#rfc is running only with more memory
+rm -rf /tmp/t-rfc;./bin/spark-submit --executor-memory 4g --class com.sjsu.cmpe239.yelp.spark.LRRandomForest --master spark://poornimas-MacBook-Pro.local:7077 ~/predictr/build/libs/predictr-1.0-SNAPSHOT.jar;cat /tmp/t-rfc/pr/part-0000* > rfc-pr;cat /tmp/t-rfc/roc/part-0000* > rfc-roc
+
+8. Plots
+PR
+ python plot.py yelp R P dec-pr lbfgs-pr sgd-pr rfc-pr
+
+ROC
+python plot.py yelp TPRate FPRate dec-roc lbfgs-roc sgd-roc rfc-roc
+
+9. Still RFC seems to be the best model.
+	- Model is stored in /tmp/t-rfc/model/
+
+10. GetFinalOutputRestaurantIds (/data/239/yelp/predOut/allPredRestIDs.txt) 
+	- Generate user and restaurant ids for which we will predict the scores
+	- Take 1% of the users
+	- Take 5% of restaurant from the city where the user had visited restaurants before
+	- We will use these user, restaurant pairs to predict the scores
+
+11. FeatureExtractionMore (/data/239/yelp/predOut/allfeatures.txt and /data/239/yelp/predOut/allfeaturesWithInput.txt)
+	- Generate features for all data for ids generated in step-10.
+	- Set this in code to be PREDICT
+        // TODO change here
+        String option = "PREDICT";
+	- allfeatures.txt is used to predict the scores
+	- allFeaturesWithInput.txt is used to join scores and input data
+
+12. Predict Scores (change to your jar) (/data/239/yelp/predOut/allfeatures.txt.out)
+rm -rf /data/239/yelp/predOut/allfeatures.txt.out;./bin/spark-submit --executor-memory 4g --class com.sjsu.cmpe239.yelp.spark.PredictScores --master spark://poornimas-MacBook-Pro.local:7077 ~/predictr/build/libs/predictr-1.0-SNAPSHOT.jar
+
+13. copy the output to a single file
+cat /data/239/yelp/predOut/allfeatures.txt.out/part-* > /data/239/yelp/predOut/allScores.txt
+
+14. JoinScores (/data/239/yelp/predOut/joinScores.txt)
+	- Joins allfeaturesWithInput.txt and allScores.txt to generate ids with scores.
+	- Since spark scores in the same order as input, I am just assuming first line of input has score in the first line.
+
+15. PrepareDataForDB (/data/239/yelp/predOut/topRests.txt and /data/239/yelp/predOut/dbInput.txt)
+	- Top 2 restaurant for the users
+	- Scores for each user and restaurant
+	- topRests.txt (TSV)
+userId, userName, 1stRest, 2ndRest
+	- dbInput.txt (TSV)
+userId, targetRestId, targetRest, prevRest1, prevRest2, prevRest3, prevRest4, score
+	- Each Restaurant has following details
+name:categories:rating:reviewCount:city:state
